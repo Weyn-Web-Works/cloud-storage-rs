@@ -96,7 +96,7 @@ mod download_options;
 mod error;
 /// Contains objects as represented by Google, to be used for serialization and deserialization.
 mod resources;
-mod token;
+pub mod token;
 
 pub use crate::{
     client::Client,

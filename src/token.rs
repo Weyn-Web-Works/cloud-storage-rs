@@ -1,9 +1,13 @@
+//! Tokens for Google Cloud Storage endpoints.
+
 use std::fmt::{Display, Formatter};
 
 /// Trait that refreshes a token when it is expired
 #[async_trait::async_trait]
 pub trait TokenCache: Sync {
+    /// The token Data
     type TokenData: Sync + Send + Clone + Display;
+
     /// Getter for the token
     async fn get_token(&self) -> Option<Self::TokenData>;
 
@@ -62,6 +66,7 @@ pub struct Token {
     access_scope: String,
 }
 
+/// Default Token Data
 #[derive(Debug, Clone)]
 pub struct DefaultTokenData(pub String, u64);
 
@@ -78,6 +83,7 @@ impl Default for Token {
 }
 
 impl Token {
+    /// make a new Token for a given scope
     pub fn new(scope: &str) -> Self {
         Self {
             token: tokio::sync::RwLock::new(None),
