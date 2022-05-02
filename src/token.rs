@@ -5,40 +5,35 @@ use std::fmt::{Display, Formatter};
 /// Trait that refreshes a token when it is expired
 #[async_trait::async_trait]
 pub trait TokenCache: Sync {
-    /// The token Data
-    type TokenData: Sync + Send + Clone + Display;
+    /// Returns the token that is currently held within the instance of `TokenCache`, together with
+    /// the expiry of that token as a u64 in seconds sine the Unix Epoch (1 Jan 1970).
+    async fn token_and_exp(&self) -> Option<(String, u64)>;
 
-    /// Getter for the token
-    async fn get_token(&self) -> Option<Self::TokenData>;
+    /// Updates the token to the value `token`.
+    async fn set_token(&self, token: String, exp: u64) -> crate::Result<()>;
 
-    /// Updates the token
-    async fn set_token(&self, token: Self::TokenData) -> crate::Result<()>;
+    /// Returns the intended scope for the current token.
+    async fn scope(&self) -> String;
 
-    /// Getter for the scope
-    fn get_scope(&self) -> &str;
-
-    /// Returns whether the token is expired
-    fn is_expired(token: &Self::TokenData) -> bool;
-
-    /// Returns a valid, unexpired token
-    /// Otherwise updates and returns the token
-    async fn get(&self, client: &reqwest::Client) -> crate::Result<Self::TokenData> {
-        match self.get_token().await {
-            Some(token) if !Self::is_expired(&token) => Ok(token),
+    /// Returns a valid, unexpired token. If the contained token is expired, it updates and returns
+    /// the token.
+    async fn get(&self, client: &reqwest::Client) -> crate::Result<String> {
+        match self.token_and_exp().await {
+            Some((token, exp)) if now() > exp => Ok(token),
             _ => {
-                let scope = self.get_scope();
-                let token = Self::fetch_token(client, scope).await?;
-                self.set_token(token).await?;
+                let (token, exp) = self.fetch_token(client).await?;
+                self.set_token(token, exp).await?;
 
-                self.get_token()
+                self.token_and_exp()
                     .await
+                    .map(|(t, _)| t)
                     .ok_or(crate::Error::Other("Token is not set".to_string()))
             }
         }
     }
 
     /// Fetches and returns the token using the service account
-    async fn fetch_token(client: &reqwest::Client, scope: &str) -> crate::Result<Self::TokenData>;
+    async fn fetch_token(&self, client: &reqwest::Client) -> crate::Result<(String, u64)>;
 }
 
 #[derive(serde::Serialize)]
@@ -51,10 +46,11 @@ struct Claims {
 }
 
 #[derive(serde::Deserialize, Debug)]
+// #[allow(dead_code)]
 struct TokenResponse {
     access_token: String,
-    expires_in: usize,
-    token_type: String,
+    expires_in: u64,
+    // token_type: String,
 }
 
 /// This struct contains a token, an expiry, and an access scope.
@@ -68,7 +64,7 @@ pub struct Token {
 
 /// Default Token Data
 #[derive(Debug, Clone)]
-pub struct DefaultTokenData(pub String, u64);
+pub struct DefaultTokenData(String, u64);
 
 impl Display for DefaultTokenData {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -91,33 +87,29 @@ impl Token {
         }
     }
 }
+
 #[async_trait::async_trait]
 impl TokenCache for Token {
-    type TokenData = DefaultTokenData;
-
-    fn get_scope(&self) -> &str {
-        self.access_scope.as_ref()
+    async fn scope(&self) -> String {
+        self.access_scope.clone()
     }
 
-    fn is_expired(token: &Self::TokenData) -> bool {
-        token.1 > now()
+    async fn token_and_exp(&self) -> Option<(String, u64)> {
+        self.token.read().await.as_ref().map(|d| (d.0.clone(), d.1))
     }
 
-    async fn get_token(&self) -> Option<Self::TokenData> {
-        self.token.read().await.clone()
-    }
-    async fn set_token(&self, token: Self::TokenData) -> crate::Result<()> {
-        *self.token.write().await = Some(token);
+    async fn set_token(&self, token: String, exp: u64) -> crate::Result<()> {
+        *self.token.write().await = Some(DefaultTokenData(token, exp));
         Ok(())
     }
 
-    async fn fetch_token(client: &reqwest::Client, scope: &str) -> crate::Result<Self::TokenData> {
+    async fn fetch_token(&self, client: &reqwest::Client) -> crate::Result<(String, u64)> {
         let now = now();
         let exp = now + 3600;
 
         let claims = Claims {
             iss: crate::SERVICE_ACCOUNT.client_email.clone(),
-            scope: scope.into(),
+            scope: self.scope().await.into(),
             aud: "https://www.googleapis.com/oauth2/v4/token".to_string(),
             exp,
             iat: now,
@@ -140,7 +132,7 @@ impl TokenCache for Token {
             .await?
             .json()
             .await?;
-        Ok(DefaultTokenData(response.access_token, exp))
+        Ok((response.access_token, now + response.expires_in))
     }
 }
 

@@ -1,8 +1,8 @@
 pub use crate::resources::bucket::Owner;
 use crate::resources::object_access_control::ObjectAccessControl;
-use futures::Stream;
+use futures_util::Stream;
 #[cfg(feature = "global-client")]
-use futures::TryStream;
+use futures_util::TryStream;
 use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
 use std::collections::HashMap;
 
@@ -227,11 +227,12 @@ pub struct ObjectList {
 
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
 pub(crate) struct RewriteResponse {
-    pub(crate) kind: String,
-    pub(crate) total_bytes_rewritten: String,
-    pub(crate) object_size: String,
-    pub(crate) done: bool,
+    kind: String,
+    total_bytes_rewritten: String,
+    object_size: String,
+    done: bool,
     pub(crate) resource: Object,
 }
 
@@ -330,7 +331,7 @@ impl Object {
         file.read_to_end(&mut buffer)
             .map_err(|e| crate::Error::Other(e.to_string()))?;
 
-        let stream = futures::stream::once(async { Ok::<_, crate::Error>(buffer) });
+        let stream = futures_util::stream::once(async { Ok::<_, crate::Error>(buffer) });
 
         crate::runtime()?.block_on(Self::create_streamed(
             bucket, stream, length, filename, mime_type,
@@ -368,7 +369,7 @@ impl Object {
     /// This function requires that the feature flag `sync` is enabled in `Cargo.toml`.
     #[cfg(all(feature = "global-client", feature = "sync"))]
     pub fn list_sync(bucket: &str, list_request: ListRequest) -> crate::Result<Vec<ObjectList>> {
-        use futures::TryStreamExt;
+        use futures_util::TryStreamExt;
 
         let rt = crate::runtime()?;
         let listed = rt.block_on(Self::list(bucket, list_request))?;
@@ -920,8 +921,10 @@ mod ring {
     #[cfg_attr(all(feature = "ring", feature = "openssl"), allow(dead_code))]
     #[inline(always)]
     pub fn rsa_pkcs1_sha256(message: &str) -> crate::Result<Vec<u8>> {
-        use ring::rand::SystemRandom;
-        use ring::signature::{RsaKeyPair, RSA_PKCS1_SHA256};
+        use ring::{
+            rand::SystemRandom,
+            signature::{RsaKeyPair, RSA_PKCS1_SHA256},
+        };
 
         let key_pem = pem::parse(crate::SERVICE_ACCOUNT.private_key.as_bytes())?;
         let key = RsaKeyPair::from_pkcs8(&key_pem.contents)?;
@@ -968,7 +971,7 @@ pub(crate) fn percent_encode(input: &str) -> String {
 mod tests {
     use super::*;
     use crate::Error;
-    use futures::{stream, StreamExt, TryStreamExt};
+    use futures_util::{stream, StreamExt, TryStreamExt};
 
     #[tokio::test]
     async fn create() -> Result<(), Box<dyn std::error::Error>> {
@@ -1545,9 +1548,9 @@ impl<S: Stream<Item = crate::Result<u8>> + Unpin> Stream for SizedByteStream<S> 
 
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,
-        cx: &mut futures::task::Context,
-    ) -> futures::task::Poll<Option<Self::Item>> {
-        futures::StreamExt::poll_next_unpin(&mut self.bytes, cx)
+        cx: &mut std::task::Context,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        futures_util::StreamExt::poll_next_unpin(&mut self.bytes, cx)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
